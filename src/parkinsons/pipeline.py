@@ -240,3 +240,31 @@ def build_hgbr_tuned(
             ),
         ]
     )
+
+
+# -- Experiment 05 (teammate): skrub TableVectorizer + HGBR ------------------
+
+
+def build_skrub_learner() -> Pipeline:
+    """Return an unfit skrub TableVectorizer + HGBR pipeline.
+
+    Uses ``skrub.TableVectorizer`` to handle all column types — including
+    categorical string columns such as ``gene``, ``cohort``, and ``rater_id``
+    — followed by ``HistGradientBoostingRegressor``. No manual string-dropping
+    or imputation needed: TableVectorizer encodes categoricals and handles NaN.
+    Used by ``experiments/05_skrub_tabular.py``.
+
+    Returns
+    -------
+    Pipeline
+        Unfit ``Pipeline([("vectorizer", TableVectorizer()), ("hgbr", HGBR)])``
+        ready for ``fit(X, y)`` or ``skore.evaluate``.
+    """
+    from skrub import TableVectorizer
+
+    return Pipeline(
+        steps=[
+            ("vectorizer", TableVectorizer()),
+            ("hgbr", HistGradientBoostingRegressor(random_state=0)),
+        ]
+    )
