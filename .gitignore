@@ -33,3 +33,26 @@ skills/
 
 # local git worktrees
 .worktrees/
+# Windows virtual environment
+.venv-win/
+
+# Local credentials and environment files
+.env.*
+!.env.example
+
+# Local datasets and EDA reports
+data/*.csv
+data/*.parquet
+data/*.xlsx
+data/*.json
+data/*.html
+
+# Python cache and build artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Local Skore reports and generated outputs
+evdgreenteam/
+submissions/
+scratch/
