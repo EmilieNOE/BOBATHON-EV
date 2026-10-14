@@ -12,8 +12,8 @@ stem).
 
 - **Project / dataset:** Parkinson's disease UPDRS motor score regression
 - **Goal:** Predict a patient's UPDRS motor score (continuous) from clinical visit features
-- **Last experiment:** 13_tuned_smoothed - done
-- **Last result:** Kaggle public 4.215 (best so far); grouped-CV RMSE 4.3975 ± 0.139 (11_tuned base + per-patient linear smoothing, w=0.75). Kaggle is ~0.2 better than grouped CV.
+- **Last experiment:** 21_final - done (no improvement over 17)
+- **Last result:** Best remains 17_stage2_feats — Kaggle 3.759 | CV RMSE 3.9949 ± 0.138. Experiments 18–21 each improved CV by ~0.015 at alpha=0.2 traj blend (all 5 folds better) but mean gain < 0.03 strict threshold. Grouped-CV is ~0.24 better than Kaggle public.
 
 <!--
 Workspace decisions: one-time project-setup choices. Record each when
@@ -71,8 +71,16 @@ Status values: planned | approved | running | done | abandoned.
 | `10_smoothing` | + per-patient linear-trend blend on OOF predictions | done | CV RMSE 4.47 ± 0.14; Kaggle 4.501 (same as 09: smoothing was missing at test time in that file, fixed in 13) | — |
 | `11_tuned` | HGBR tuned (lr 0.02, 31 leaves, min leaf 20, 1000 iter, early stopping) | done | CV RMSE 4.65 ± 0.15; Kaggle 4.431 | — |
 | `12_ensemble` | HGBR seed-average (5 seeds) | done | CV RMSE 4.62 (seed-mean OOF); not submitted | — |
-| `13_tuned_smoothed` | 11_tuned + within-frame per-patient linear smoothing (w=0.75) | done | CV RMSE 4.3975 ± 0.139; **Kaggle 4.215 (best)** | — |
+| `13_tuned_smoothed` | 11_tuned + within-frame per-patient linear smoothing (w=0.75) | done | CV RMSE 4.3975 ± 0.139; **Kaggle 4.215 (best at the time)** | — |
 | `13_physics` | physics-style features (rater correction etc.) on 11_tuned | abandoned | CV RMSE 5.46, worse than 11_tuned (4.65) | — |
+| `14_quad_smooth` | grid-search ridge-quadratic smoothing (deg/lam/w), w=0.9, deg=2 best | done | CV RMSE 4.3604; **Kaggle 4.162** | — |
+| `15_bias` | stage-2 stacking (HGBR on s1_preds + per-patient aggregates) | done | CV RMSE 4.1453; **Kaggle 3.804** | — |
+| `16_stage2_tuned` | tune stage-2 params + 5 seeds (lr=0.02, 300 iter, 31 leaves, min_leaf=50) | done | CV RMSE 4.1208 — gain < 0.03, no CSV | — |
+| `17_stage2_feats` | on/off input curves + off_hat as stage-2 features, 5 seeds | done | CV RMSE 3.9949 ± 0.138; **Kaggle 3.759 (current best)** | — |
+| `18_hetero` | heteroscedastic smoothing (1/sigma2 weights from error model) | done | No improvement — hetero weights harmful for smoothing; best still 3.9949 | — |
+| `19_trajectory` | patient trajectory model (quadratic params from inputs) blended with s2 | done | CV RMSE 3.9795 at alpha=0.2; all 5 folds improved but mean gain 0.0154 < 0.03 threshold | — |
+| `20_diverse` | stage-1 diversity (ExtraTrees + L3 HGBR variant feeding stage-2) | done | CV RMSE 3.9803; only 3/5 folds improved — NOT MET | — |
+| `21_final` | ensemble: 5-seed s2 + traj blend (alpha=0.2), shuffled-split confirmation | done | CV RMSE 3.9832 Pass A / 3.9743 Pass B; gain 0.0117 < 0.03 — best remains 17 | — |
 
 ## Backlog
 
@@ -83,3 +91,7 @@ has a stable B<N> index so it can be picked by number ("go with B2").
 
 | # | Item | Source |
 |---|---|---|
+| B1 | Rater-aware stage-2: add per-rater mean residual (rater_id OOF mean of stage1_pred - target, fitted on training fold) as a stage-2 feature. Rater spread is ±2.6 pts — should reduce systematic bias. | my-pick |
+| B2 | Two-stage trajectory extrapolation: estimate test-patient trajectory (a,b,c) from first 2 visits using ON/OFF slopes, then blend with stage-2. Requires ordering test visits by age within patient. | my-pick |
+| B3 | Expand stage-2 feature set: add rater_id one-hot mean residual (B1), off-change rate (off_slope - s1_slope), visit_rank within patient, and patient_age_std. | my-pick |
+| B4 | More stage-2 seeds (10 seeds) + stacking: replace simple average with a thin Ridge meta-learner on 10-seed OOF predictions. | my-pick |

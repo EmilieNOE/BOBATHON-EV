@@ -98,6 +98,13 @@ def add_s1_aggregates(X_frame: pd.DataFrame, s1_preds: np.ndarray) -> pd.DataFra
 
     original_idx = X_out.index
     X_out = X_out.sort_values(["patient_id", "age"])
+    # Use integer position array (avoids repeated index.get_loc calls)
+    # Save original index as a regular column before reset
+    X_out["__orig_idx__"] = np.arange(len(X_out))   # positional; we'll map back via original_idx
+    # Also store a copy of the actual index values for restoration
+    X_out = X_out.reset_index(drop=False)
+    # After reset_index the original index becomes a column; its name depends on the index name
+    orig_col = original_idx.name if original_idx.name is not None else "index"
 
     s1_arr = X_out["_s1"].values.astype(float)
     ages   = X_out["age"].values
@@ -118,18 +125,23 @@ def add_s1_aggregates(X_frame: pd.DataFrame, s1_preds: np.ndarray) -> pd.DataFra
     pm_on    = np.full(n, np.nan)
     pm_off   = np.full(n, np.nan)
     pm_ledd  = np.full(n, np.nan)
-    # per-patient slope of s1 vs age (linear)
     s1_slope = np.full(n, np.nan)
-    # time_since_diagnosis
     tsd      = (X_out["age"] - X_out["age_at_diagnosis"]).values
 
-    for pid, grp in X_out.groupby("patient_id"):
-        pos    = [X_out.index.get_loc(i) for i in grp.index]
-        pg     = s1_arr[pos]
-        ag     = ages[pos]
-        ag_c   = ag - ag.mean()
-        nv     = len(grp)
-        trend  = _quad_trend_values(ag_c, pg)
+    # group by patient using the sorted (reset) positional index
+    pid_arr = X_out["patient_id"].values
+    start   = 0
+    while start < n:
+        pid   = pid_arr[start]
+        end   = start
+        while end < n and pid_arr[end] == pid:
+            end += 1
+        pos = np.arange(start, end)
+        pg  = s1_arr[pos]
+        ag  = ages[pos]
+        ag_c = ag - ag.mean()
+        nv  = end - start
+        trend = _quad_trend_values(ag_c, pg)
         s1_mean[pos]  = np.mean(pg)
         s1_med[pos]   = np.median(pg)
         s1_min[pos]   = np.min(pg)
@@ -137,23 +149,25 @@ def add_s1_aggregates(X_frame: pd.DataFrame, s1_preds: np.ndarray) -> pd.DataFra
         s1_quad[pos]  = trend
         s1_qres[pos]  = pg - trend
         s1_nvis[pos]  = nv
-        for k, p in enumerate(pos):
-            s1_prev[p] = pg[k-1] if k > 0    else np.nan
-            s1_next[p] = pg[k+1] if k < nv-1 else np.nan
-        off_frac[pos] = grp["off"].notna().mean()
+        s1_prev[pos[1:]] = pg[:-1]
+        s1_next[pos[:-1]] = pg[1:]
+        grp_off  = X_out["off"].values[pos]
+        grp_on   = X_out["on"].values[pos]
+        grp_ledd = X_out["ledd"].values[pos] if "ledd" in X_out.columns else np.full(nv, np.nan)
+        off_frac[pos] = np.sum(~np.isnan(grp_off)) / nv
         yrs_fst[pos]  = ag - ag.min()
-        pm_on[pos]    = grp["on"].mean()
-        pm_off[pos]   = grp["off"].mean()
-        pm_ledd[pos]  = grp["ledd"].mean() if "ledd" in grp.columns else np.nan
-        # slope of s1 vs age
+        pm_on[pos]    = np.nanmean(grp_on)
+        pm_off[pos]   = np.nanmean(grp_off)
+        pm_ledd[pos]  = np.nanmean(grp_ledd)
         if nv >= 3:
-            lr = LinearRegression()
-            lr.fit(ag.reshape(-1, 1), pg)
-            s1_slope[pos] = lr.coef_[0]
+            A_ = np.column_stack([ag, np.ones(nv)])
+            coef_, _, _, _ = np.linalg.lstsq(A_, pg, rcond=None)
+            s1_slope[pos] = coef_[0]
         elif nv == 2:
             s1_slope[pos] = (pg[1] - pg[0]) / max(ag[1] - ag[0], 1e-6)
         else:
             s1_slope[pos] = 0.0
+        start = end
 
     X_out["s1_mean"]  = s1_mean
     X_out["s1_med"]   = s1_med
@@ -172,16 +186,31 @@ def add_s1_aggregates(X_frame: pd.DataFrame, s1_preds: np.ndarray) -> pd.DataFra
     X_out["pm_ledd"]  = pm_ledd
     X_out["tsd"]      = tsd
 
-    # Also previous/next of on, off, ledd within patient
+    # prev/next of on, off, ledd (already sorted by patient+age)
     for col in ("on", "off", "ledd"):
         if col not in X_out.columns:
             continue
-        g = X_out.groupby("patient_id")[col]
-        X_out[f"{col}_prev2"] = g.shift(1)
-        X_out[f"{col}_next2"] = g.shift(-1)
-        X_out[f"{col}_pm2"]   = g.transform("mean")
+        vals = X_out[col].values.astype(float)
+        prev_v = np.full(n, np.nan)
+        next_v = np.full(n, np.nan)
+        start  = 0
+        while start < n:
+            pid = pid_arr[start]
+            end = start
+            while end < n and pid_arr[end] == pid:
+                end += 1
+            pos = np.arange(start, end)
+            prev_v[pos[1:]]  = vals[pos[:-1]]
+            next_v[pos[:-1]] = vals[pos[1:]]
+            start = end
+        X_out[f"{col}_prev2"] = prev_v
+        X_out[f"{col}_next2"] = next_v
+        X_out[f"{col}_pm2"]   = X_out.groupby("patient_id")[col].transform("mean").values
 
-    X_out = X_out.drop(columns=["_s1", "patient_id"])
+    X_out = X_out.drop(columns=["_s1", "patient_id", "__orig_idx__"])
+    # Restore original index from the preserved column
+    X_out = X_out.set_index(orig_col)
+    X_out.index.name = original_idx.name
     return X_out.loc[original_idx]
 
 
